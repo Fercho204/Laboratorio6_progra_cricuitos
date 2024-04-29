@@ -1,0 +1,220 @@
+// Lab6 6 finalizado
+//------------------------------------------------------------------------------
+// Encabezado
+//------------------------------------------------------------------------------
+// Universidad del valle de Guatemala
+// IE2023 Programación de Microcontroladores
+// Author : Fernando José Pérez Palomo - 22357
+// Laboratorio: Laboratorio6.asm
+// Descripción: Leer potenciómetro, mostrarlo con leds o enviar valor ASCII 
+// Hardware: ATMega328P
+
+#define  F_CPU 16000000UL
+#include <avr/io.h>
+#include <util/delay.h>
+#include <avr/interrupt.h>
+#include <ctype.h>
+#include <stdio.h>
+
+void InitADC1(void);
+void initUart9600(void);
+void WriteTextUART(char * Texto);
+void writeUART(char Caracter);
+void recieveUART(void);
+void Lecturapot(void);
+void LecturaAscii(void);
+char enteroACaracter(int);
+
+volatile uint8_t BufferTX;
+volatile uint8_t bit6;
+volatile uint8_t bit2;
+volatile uint8_t modo;
+volatile uint8_t valoradc;
+volatile uint8_t valorascii;
+volatile uint8_t pedirmodo;
+// Declaración de variables volátiles de 8 bits que se utilizarán en el programa.
+// BufferTX se utiliza para almacenar datos que se enviarán a través de UART.
+// bit6 y bit2 son variables que parecen estar relacionadas con el manejo de bits.
+
+int main(void)
+{
+    initUart9600();
+	sei();
+	InitADC1();
+    pedirmodo = 0;
+	
+    while (1) 
+    {
+		WriteTextUART("\n \r");
+		WriteTextUART("\n \r");
+	    WriteTextUART("Elija una opcion: ");
+		WriteTextUART("\n \r");
+		WriteTextUART("\n \r"); 
+		WriteTextUART(" 1. Leer pot ");
+		WriteTextUART("\n \r");
+		WriteTextUART("\n 2. Enviar valor ASCII ");
+		WriteTextUART("\n \r");
+		WriteTextUART("\n \r");
+ 	    pedirmodo = 0;
+		BufferTX = 0;
+		while (pedirmodo == 0)
+		{
+			modo = BufferTX;
+			switch (modo)
+			{
+				case 49: //Si mi valor de la terminal es 1 = 49, entonces  estoy en el modo potenciómetro.
+				pedirmodo = 1;
+				break;
+				case 50: //Si mi valor de la terminal es 2 = 50,  entonces estoy en el modo formato ASCII.
+				pedirmodo = 1;
+				break;
+			}
+		}
+		switch (modo)
+		{
+			case 49: //Si mi valor de la terminal es 1 = 49, entonces  estoy en el modo potenciómetro.
+			Lecturapot();
+			break;
+			case 50: //Si mi valor de la terminal es 2 = 50,  entonces estoy en el modo formato ASCII.
+			LecturaAscii();
+			break;
+			
+		}
+	}
+}
+
+void initUart9600(void){
+	DDRB = 0xFF;
+	//PORTB = 0;
+	DDRC |= (1<<DDC1)|(1<<DDD0);
+	PORTC = 0;
+	//Paso 1: RX como entrada y TX como salida.
+	DDRD |= (1<<DDD1);
+	DDRD &=	~(1<<DDD0);
+	//Paso 2: Configurar UCSR0A
+	UCSR0A = 0;
+	//Paso 3: Configurar UCSR0B: habilitamos ISR de recepción y RX Y TX.
+	UCSR0B = 0;
+	UCSR0B |= (1<<RXCIE0) | (1<<RXEN0) | (1<<TXEN0); //Estoy activando la bandera que me indica que se recibió el mensaje.
+	//Paso 4: COnfigurar UCSR0C: Primero asíncrono, sin pariedad, bit 1 de stop, Data bits/ 8 bits, 
+	UCSR0C = 0;
+	UCSR0C |= (1<<UCSZ01) | (1<<UCSZ00);
+	//Paso 5: Configurar velocidad de Baudrate: 9600
+	UBRR0 = 103;
+}
+
+void InitADC1(void){
+	ADMUX |= (1 << REFS0);      //Estoy configurando a que funcione con AVCC.
+	ADMUX &= ~(1 << REFS1);
+	//Justificacion a la izquierda.
+	ADMUX |= (1 << ADLAR);
+	//Apagamos la salida digital de PINC2
+	DIDR0 |= (1 << ADC2D);
+	//Configuración del canal 2 ya que allí esta mi potenciómetro.
+	ADMUX |= (1 << MUX1);
+	//ADMUX &= ~(1 << MUX0);
+	ADCSRA = 0;
+	//Habilitamos la bandera del ADC
+	ADCSRA |= (1 << ADIE);
+	//Habilitamos el prescaler a 128.
+	ADCSRA |= (1 << ADPS2)|(1 << ADPS1)|(1 << ADPS0);
+	//Habilitamos el ADC
+	ADCSRA |= (1 << ADEN);
+	
+	
+}
+
+void writeUART(char Caracter){
+	while(!(UCSR0A & (1<<UDRE0)));
+	UDR0 = Caracter;
+	PORTD = Caracter;
+}
+
+ISR(USART_RX_vect){  //uint8_t bit2;
+	BufferTX = UDR0;
+	while(!(UCSR0A & (1<<UDRE0)));
+	UDR0 = BufferTX;
+}
+
+ISR(ADC_vect){
+	valoradc = ADCH;
+	ADCSRA |= (1<<ADIF); // Apaga la bandera de interrupción del ADC
+}
+
+
+void WriteTextUART(char * Texto){
+	uint8_t i;
+	for (i=0; Texto[i]!= '\0'; i++){
+		while (!(UCSR0A & (1<<UDRE0)) );
+		UDR0 = Texto[i];
+	}
+}
+
+void Lecturapot(void){int valorpot, valorunidad, valordecena, valorcentena;
+	// Declara una función llamada "Lecturapot" que no devuelve valor y no toma argumentos
+	// Declara cuatro variables enteras: valorpot, valorunidad, valordecena, y valorcentena
+
+	valoradc = ADCH;
+	// Asigna el valor del registro ADCH a la variable valoradc
+
+	ADCSRA |= (1<<ADSC);
+	// Establece el bit ADSC en el registro ADCSRA para iniciar una nueva conversión ADC
+
+	bit6 = valoradc & 0x3F;
+	PORTB = bit6;
+	// Extrae los 6 bits menos significativos de valoradc y los escribe en el puerto B
+
+	bit2 = ((valoradc & 0xC0) >> 6);
+	PORTC = bit2;
+	// Extrae los 2 bits más significativos de valoradc y los escribe en el puerto C
+
+	valorpot = valoradc;
+	// Copia el valor completo de valoradc en valorpot
+
+	valorcentena = valorpot / 100.0;
+	valordecena  = (valorpot - (valorcentena*100)) / 10.0;
+	valorunidad  = (valorpot - (valorcentena*100) - (valordecena*10));
+	// Descompone valorpot en sus dígitos individuales: centenas, decenas y unidades
+
+	WriteTextUART("\n\r");
+	WriteTextUART("Valor del pot: ");
+	writeUART(valorcentena+48);
+	writeUART(valordecena+48);
+	writeUART(valorunidad+48);
+	// Envía por UART un mensaje seguido por los dígitos descompuestos del valor del potenciómetro en formato ASCII
+
+	while (ADCSRA & (1 << ADSC));
+	// Espera hasta que se complete la conversión ADC actual antes de continuar
+
+}
+
+
+void  LecturaAscii (void){volatile uint8_t valorascii;
+	// Declara una función llamada "LecturaAscii" que no devuelve valor y no toma argumentos
+	// Declara una variable volátil de 8 bits llamada "valorascii"
+
+	_delay_ms(100);
+	// Espera durante 100 milisegundos
+
+	WriteTextUART("\n\r");
+	WriteTextUART(" Elija una opcion: ");
+	// Envía por UART un mensaje solicitando al usuario que elija una opción
+
+	BufferTX = 0;
+	// Inicializa el buffer de transmisión UART en cero
+
+	while (BufferTX == 0)
+	{
+		valorascii = BufferTX;
+	}
+	// Espera hasta que se reciba un valor en el buffer de transmisión UART y lo guarda en valorascii
+
+	bit6 = valorascii & 0x3F;
+	PORTB = bit6;
+	// Extrae los 6 bits menos significativos de valorascii y los escribe en el puerto B
+
+	bit2 = ((valorascii & 0xC0) >> 6);
+	PORTC = bit2;
+	// Extrae los 2 bits más significativos de valorascii y los escribe en el puerto C
+	
+}
